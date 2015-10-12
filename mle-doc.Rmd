@@ -1,0 +1,215 @@
+---
+title: "MLE in R"
+author: "Alexander D Forrence"
+date: "October 12, 2015"
+output: html_document
+---
+
+```{r}
+library(bbmle)
+library(emdbook)
+library(ggplot2)
+library(psyphy)
+library(zoo)
+
+setwd("C:/Users/aforr_000/Desktop/lab-materials/mle")
+df <- read.csv("RTSample.csv", col.names = c("RT", "hits"))
+head(df)
+# Remove NAs
+df <- df[complete.cases(df),]
+# Reorder
+df <- df[order(df$RT),]
+# Filter out impossible
+df <- df[df$RT > 0,]
+```
+
+We can take the rolling mean, just to get an idea of the data.
+```{r}
+roll_hit <- rollmean(df$hits, 15)
+roll_rt <- rollmean(df$RT, 15)
+df2 <- data.frame(cbind(roll_rt, roll_hit))
+plot(roll_hit ~ roll_rt, data = df2)
+```
+
+Now we'll set the initial estimates, etc...
+
+The MATLAB negative log likelihood function was:
+```{r, eval = FALSE}
+LL = @(params) 
+    -sum(hit.*log(1/Ntargs+(asymptErr-1/Ntargs)*normcdf(RT,params(1),params(2))) +
+             (1-hit).*log(1-(1/Ntargs+(asymptErr-1/Ntargs)*normcdf(RT,params(1),
+            params(2))))) - alpha*params(2)^2;
+
+```
+
+```{r,warning=FALSE,message=FALSE}
+logliksig <- function(mu, sigma, ivs, dv){
+    alpha <- 0
+    Ntargs <- 6
+    asymptErr <- 0.7
+
+    phi_ish <- log(1/Ntargs + (asymptErr - 1/Ntargs) * 
+                       pnorm(ivs, mu, sigma))
+    
+    phi_ish2 <- log(1 - (1/Ntargs + (asymptErr - 1/Ntargs) * 
+                             pnorm(ivs, mu, sigma)))
+    
+    -sum(dv %*% phi_ish + (1 - dv) %*% phi_ish2) - alpha * sigma^2
+}
+
+# Optimizing
+mu <- 200
+sigma <- 100
+
+start_vals <- list(mu = mu, sigma = sigma)
+
+# We can even put a bound on sigma (which keeps it from yelling)
+m1 <- mle2(logliksig, 
+           start = start_vals, 
+           method = "L-BFGS-B", 
+           optimizer = "optim",
+           data = list(ivs = df$RT, dv = df$hits),
+           lower = list(sigma = 0))
+summary(m1)
+
+m1_prof <- profile(m1)
+plot(m1_prof)
+```
+
+The profile function returns the signed square root of the difference between the deviance and the minimum deviance (so that if the profile is perfectly quadratic, lines will be straight).
+
+We can look at the surface too (not too pretty):
+```{r}
+cc <- curve3d(m1@minuslogl(x,y,df$RT,df$hits),
+              xlim=c(250,370),ylim=c(20,100),sys3d="image")
+contour(cc$x,cc$y,cc$z,add=TRUE)
+points(coef(m1)[1], coef(m1)[2],pch=16)
+```
+
+We got pretty close to MATLAB's answers of $\mu = 318.2887$ and $\sigma = 64.3154$. `bbmle` also gives us easy access to profile standard errors/confidence intervals on parameters.
+
+```{r, warning = FALSE}
+confint(m1)
+
+```
+
+We'll compare it to a `glm` fit, with appropriate link function...
+
+```{r}
+m2 <- glm(hits ~ RT, data = df, 
+             family = binomial(link = mafc.probit(.m = 6)))
+logLik(m1)
+logLik(m2)
+```
+
+That doesn't do as well as our `mle2` fit. However, `psyphy` can also estimate the upper asymptote with a little effort.
+
+```{r}
+m3 <- glm.lambda(hits ~ RT, 
+                 data = df, 
+                 NumAlt = 6, 
+                 lambda = seq(0.14, 0.23, len = 100),
+                 plot.it = TRUE)
+summary(m3)
+logLik(m3)
+```
+
+Which actually gives us a marginally better fit over the ML!
+
+## Predictions
+
+*TODO*: Get predictions using `predict` function from mle2 fit
+
+```{r}
+df$pred_m1 <- 1/6 + (.7-1/6) * pnorm(df$RT, coef(m1)[1], coef(m1)[2])
+df$pred_m2 <- predict(m2, type = "response")
+df$pred_m3 <- predict(m3, type = "response")
+
+ggplot(data = df, aes(x = RT, y = hits)) + 
+    geom_point(size = 2, shape = 124, 
+               aes(colour = "Raw Values",
+                   linetype = "Raw Values")) +
+    geom_line(size = 2, 
+              aes(y = pred_m1, 
+                  colour = "mle2 predictions",
+                  linetype = "mle2 predictions")) +
+    geom_line(size = 2, 
+              aes(y = pred_m2, 
+                  colour = "Easy probit 1",
+                  linetype = "Easy probit 1")) +
+    geom_line(size = 2, 
+              aes(y = pred_m3, 
+                  colour = "Probit w/ lambda",
+                  linetype = "Probit w/ lambda")) + 
+    geom_point(data = df2, aes(x = roll_rt, y = roll_hit,
+                               colour = "Sliding window"))+
+    scale_linetype(guide = FALSE)
+
+```
+
+The probit w/o an asymptote is pretty bad-looking. The mle estimation could be better, so let's also maximize over `asymptErr` this time.
+
+```{r,warning=FALSE,message=FALSE}
+logliksig <- function(mu, sigma, asymptErr, ivs, dv){
+    alpha <- 0
+    Ntargs <- 6
+
+    phi_ish <- log(1/Ntargs + (asymptErr - 1/Ntargs) * 
+                       pnorm(ivs, mu, sigma))
+    
+    phi_ish2 <- log(1 - (1/Ntargs + (asymptErr - 1/Ntargs) * 
+                             pnorm(ivs, mu, sigma)))
+    
+    -sum(dv %*% phi_ish + (1 - dv) %*% phi_ish2) - alpha * sigma^2
+}
+
+# Starting values
+mu <- 200
+sigma <- 100
+asymptErr <- 0.7
+
+start_vals <- list(mu = mu, sigma = sigma, asymptErr = asymptErr)
+
+m4 <- mle2(logliksig, 
+           start = start_vals, 
+           method = "BFGS", 
+           optimizer = "optim",
+           data = list(ivs = df$RT, dv = df$hits))
+summary(m4)
+logLik(m4)
+logLik(m3)
+```
+
+I removed the bound on `sigma` because the LL was giving infinite values. $\mu = 341.1625$, $\sigma = 76.2185$, $asymptErr = 1.3707$ from MATLAB. The transformed version of asymptErr is ~.7975 (1/(1 + exp(asymptErr))). We also got a slightly better log likelihood compared to MATLAB (93.1552) (are they commensurate though?).
+
+```{r,warning = FALSE,message=FALSE}
+m4_prof <- profile(m4)
+plot(m4_prof)
+confint(m4_prof)
+```
+
+```{r,echo=FALSE}
+df$pred_m4 <- 1/6 + (coef(m4)[3]-1/6) * pnorm(df$RT, coef(m4)[1], coef(m4)[2])
+ggplot(data = df, aes(x = RT, y = hits)) + 
+    geom_point(size = 2, shape = 124, 
+               aes(colour = "Raw Values",
+                   linetype = "Raw Values")) +
+    geom_line(size = 2, 
+              aes(y = pred_m1, 
+                  colour = "mle2 predictions",
+                  linetype = "mle2 predictions")) +
+    geom_line(size = 2, 
+              aes(y = pred_m4, 
+                  colour = "Variable asymptote MLE",
+                  linetype = "Variable asymptote MLE")) +
+    geom_line(size = 2, 
+              aes(y = pred_m3, 
+                  colour = "Probit w/ lambda",
+                  linetype = "Probit w/ lambda")) + 
+    geom_point(data = df2, aes(x = roll_rt, y = roll_hit,
+                               colour = "Sliding window")) +
+    scale_linetype(guide = FALSE)
+
+```
+
+The new mle2 fit and the psyphy fit are practically identical.
