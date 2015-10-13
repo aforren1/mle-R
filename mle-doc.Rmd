@@ -5,7 +5,7 @@ date: "October 12, 2015"
 output: html_document
 ---
 
-```{r}
+```{r, warning=FALSE,message=FALSE}
 library(bbmle)
 library(emdbook)
 library(ggplot2)
@@ -76,7 +76,7 @@ m1_prof <- profile(m1)
 plot(m1_prof)
 ```
 
-The profile function returns the signed square root of the difference between the deviance and the minimum deviance (so that if the profile is perfectly quadratic, lines will be straight).
+The profile function returns the signed square root of the difference between the deviance and the minimum deviance (so that if the profile is perfectly quadratic, lines will be straight) [manual](https://cran.r-project.org/web/packages/bbmle/bbmle.pdf).
 
 We can look at the surface too (not too pretty):
 ```{r}
@@ -147,7 +147,7 @@ ggplot(data = df, aes(x = RT, y = hits)) +
 
 ```
 
-The probit w/o an asymptote is pretty bad-looking. The mle estimation could be better, so let's also maximize over `asymptErr` this time.
+The probit w/o an asymptote does relatively poorly. The mle estimation could be better, so let's also maximize over `asymptErr` this time.
 
 ```{r,warning=FALSE,message=FALSE}
 logliksig <- function(mu, sigma, asymptErr, ivs, dv){
@@ -213,3 +213,11 @@ ggplot(data = df, aes(x = RT, y = hits)) +
 ```
 
 The new mle2 fit and the psyphy fit are practically identical.
+
+One thing that I *just* realized was that the `asymptErr` is equivalent to $(1 - \lambda)$ (and they're very close in the `m3` & `m4` example). It's somewhat comforting that we can get the same answer, either by optimizing over the parameter directly or the more kludgy loop.
+
+Other things to try:
+
+- Modeling the population w/ a mixed model
+    - See [this discussion](https://stat.ethz.ch/pipermail/r-sig-mixed-models/2013q1/019890.html) for thoughts about optimizing $\lambda$ or `asymptErr` directly (seems pretty difficult though).
+- Formula interface to `mle2`, which would give us access to all of the nice things (predictions and such)
