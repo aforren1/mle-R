@@ -13,7 +13,7 @@ library(psyphy)
 library(zoo)
 
 setwd("C:/Users/aforr_000/Desktop/lab-materials/mle")
-df <- read.csv("RTSample.csv", col.names = c("RT", "hits"))
+df <- read.csv("RTSample.csv", col.names = c("RT", "hit"))
 head(df)
 # Remove NAs
 df <- df[complete.cases(df),]
@@ -25,7 +25,7 @@ df <- df[df$RT > 0,]
 
 We can take the rolling mean, just to get an idea of the data.
 ```{r}
-roll_hit <- rollmean(df$hits, 15)
+roll_hit <- rollmean(df$hit, 15)
 roll_rt <- rollmean(df$RT, 15)
 df2 <- data.frame(cbind(roll_rt, roll_hit))
 plot(roll_hit ~ roll_rt, data = df2)
@@ -68,7 +68,7 @@ m1 <- mle2(logliksig,
            start = start_vals, 
            method = "L-BFGS-B", 
            optimizer = "optim",
-           data = list(ivs = df$RT, dv = df$hits),
+           data = list(ivs = df$RT, dv = df$hit),
            lower = list(sigma = 0))
 summary(m1)
 
@@ -80,7 +80,7 @@ The profile function returns the signed square root of the difference between th
 
 We can look at the surface too (not too pretty):
 ```{r}
-cc <- curve3d(m1@minuslogl(x,y,df$RT,df$hits),
+cc <- curve3d(m1@minuslogl(x,y,df$RT,df$hit),
               xlim=c(250,370),ylim=c(20,100),sys3d="image")
 contour(cc$x,cc$y,cc$z,add=TRUE)
 points(coef(m1)[1], coef(m1)[2],pch=16)
@@ -96,7 +96,7 @@ confint(m1)
 We'll compare it to a `glm` fit, with appropriate link function...
 
 ```{r}
-m2 <- glm(hits ~ RT, data = df, 
+m2 <- glm(hit ~ RT, data = df, 
              family = binomial(link = mafc.probit(.m = 6)))
 logLik(m1)
 logLik(m2)
@@ -105,7 +105,7 @@ logLik(m2)
 That doesn't do as well as our `mle2` fit. However, `psyphy` can also estimate the upper asymptote with a little effort.
 
 ```{r}
-m3 <- glm.lambda(hits ~ RT, 
+m3 <- glm.lambda(hit ~ RT, 
                  data = df, 
                  NumAlt = 6, 
                  lambda = seq(0.14, 0.23, len = 100),
@@ -125,7 +125,7 @@ df$pred_m1 <- 1/6 + (.7-1/6) * pnorm(df$RT, coef(m1)[1], coef(m1)[2])
 df$pred_m2 <- predict(m2, type = "response")
 df$pred_m3 <- predict(m3, type = "response")
 
-ggplot(data = df, aes(x = RT, y = hits)) + 
+ggplot(data = df, aes(x = RT, y = hit)) + 
     geom_point(size = 2, shape = 124, 
                aes(colour = "Raw Values",
                    linetype = "Raw Values")) +
@@ -174,7 +174,7 @@ m4 <- mle2(logliksig,
            start = start_vals, 
            method = "BFGS", 
            optimizer = "optim",
-           data = list(ivs = df$RT, dv = df$hits))
+           data = list(ivs = df$RT, dv = df$hit))
 summary(m4)
 logLik(m4)
 logLik(m3)
@@ -190,7 +190,7 @@ confint(m4_prof)
 
 ```{r,echo=FALSE}
 df$pred_m4 <- 1/6 + (coef(m4)[3]-1/6) * pnorm(df$RT, coef(m4)[1], coef(m4)[2])
-ggplot(data = df, aes(x = RT, y = hits)) + 
+ggplot(data = df, aes(x = RT, y = hit)) + 
     geom_point(size = 2, shape = 124, 
                aes(colour = "Raw Values",
                    linetype = "Raw Values")) +
